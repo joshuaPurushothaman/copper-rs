@@ -101,7 +101,7 @@
 <a href=#101 id=101 data-nosnippet>101</a></span><span class="kw">pub type </span>CuResult&lt;T&gt; = <span class="prelude-ty">Result</span>&lt;T, CuError&gt;;
 <a href=#102 id=102 data-nosnippet>102</a>
 <a href=#103 id=103 data-nosnippet>103</a><span class="doccomment">/// Defines a basic write, append only stream trait to be able to log or send serializable objects.
-<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub trait </span>WriteStream&lt;E: Encode&gt;: Sync + Send + Debug {
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub trait </span>WriteStream&lt;E: Encode&gt;: Debug + Send + Sync {
 <a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">fn </span>log(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>E) -&gt; CuResult&lt;()&gt;;
 <a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">fn </span>flush(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; CuResult&lt;()&gt; {
 <a href=#107 id=107 data-nosnippet>107</a>        <span class="prelude-val">Ok</span>(())
