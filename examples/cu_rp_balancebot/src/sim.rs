@@ -3,7 +3,7 @@ mod world;
 
 use crate::world::{Cart, Rod};
 use avian3d::math::Vector;
-use avian3d::prelude::{ExternalForce, Physics};
+use avian3d::prelude::{Forces, RigidBodyForces, Physics};
 use bevy::asset::UnapprovedPathMode;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -98,7 +98,7 @@ fn setup_copper(mut commands: Commands) {
 #[allow(clippy::type_complexity)]
 fn run_copper_callback(
     mut query_set: ParamSet<(
-        Query<(&Transform, &mut ExternalForce), With<Cart>>,
+        Query<(&Transform, Forces), With<Cart>>,
         Query<&Transform, With<Rod>>,
     )>,
     physics_time: Res<Time<Physics>>,
@@ -154,18 +154,19 @@ fn run_copper_callback(
                 let maybe_motor_actuation = input.payload();
                 if let Some(motor_actuation) = maybe_motor_actuation {
                     if motor_actuation.power.is_nan() {
-                        cart_force.apply_force(Vector::ZERO);
+                        // cart_force.apply_force(Vector::ZERO); // TODO: no need to zero this right?
                         return SimOverride::ExecutedBySim;
                     }
                     let force_magnitude = motor_actuation.power * 2.0;
                     let new_force = Vector::new(force_magnitude, 0.0, 0.0);
+                    // TODO: use forces..? cart_force.apply_force(new_force);
                     cart_force.apply_force(new_force);
                     output
                         .metadata
                         .set_status(format!("Applied force: {force_magnitude}"));
                     SimOverride::ExecutedBySim
                 } else {
-                    cart_force.apply_force(Vector::ZERO);
+                    // cart_force.apply_force(Vector::ZERO); // TODO: no need to zero this right?
                     SimOverride::Errored("Safety Mode.".into())
                 }
             }
@@ -179,7 +180,7 @@ fn run_copper_callback(
         .expect("Failed to run application.");
 }
 
-fn stop_copper_on_exit(mut exit_events: EventReader<AppExit>, mut copper_ctx: ResMut<Copper>) {
+fn stop_copper_on_exit(mut exit_events: MessageReader<AppExit>, mut copper_ctx: ResMut<Copper>) {
     for _ in exit_events.read() {
         println!("Exiting copper");
         copper_ctx

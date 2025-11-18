@@ -1,6 +1,5 @@
 use avian3d::prelude::*;
 use bevy::color::palettes::css::RED;
-use bevy::core_pipeline::fxaa::Fxaa;
 use bevy::core_pipeline::Skybox;
 use bevy::input::{
     keyboard::KeyCode,
@@ -8,6 +7,7 @@ use bevy::input::{
 };
 use bevy::pbr::{DefaultOpaqueRendererMethod, ScreenSpaceReflections};
 use bevy::prelude::*;
+use bevy_anti_alias::fxaa::Fxaa;
 use cached_path::{Cache, Error as CacheError, ProgressBar};
 #[cfg(feature = "perf-ui")]
 use iyes_perf_ui::prelude::{PerfUiAllEntries, PerfUiPlugin};
@@ -69,7 +69,7 @@ pub fn build_world(app: &mut App, headless: bool) -> &mut App {
         .add_plugins(PhysicsPlugins::default().with_length_unit(1000.0))
         // we want Bevy to measure these values for us:
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
-        .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin)
+        .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin::default())
         .insert_resource(DefaultOpaqueRendererMethod::deferred())
         .insert_resource(SimulationState::Running)
         .insert_resource(CameraControl {
@@ -93,7 +93,7 @@ pub fn build_world(app: &mut App, headless: bool) -> &mut App {
         app.add_plugins(MeshPickingPlugin);
         app.add_systems(Update, toggle_simulation_state)
             .add_systems(Update, camera_control_system)
-            .add_systems(Update, external_force_display)
+            // .add_systems(Update, external_force_display)
             .add_systems(PostUpdate, reset_sim);
     }
 
@@ -313,7 +313,7 @@ fn setup_ui(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.25, 0.41, 0.88, 0.7)),
-            BorderColor(Color::srgba(0.8, 0.8, 0.8, 0.7)),
+            BorderColor::all(Color::srgba(0.8, 0.8, 0.8, 0.7)),
             BorderRadius::all(Val::Px(10.0)),
         ))
         .with_children(|parent| {
@@ -360,7 +360,8 @@ struct SetupCompleted(bool);
 
 #[derive(Bundle)]
 struct CartBundle {
-    external_force: ExternalForce,
+    // TODO: remove
+    // external_force: Forces,
     cart: Cart,
     mass_props: MassPropertiesBundle,
     dominance: Dominance,
@@ -390,7 +391,8 @@ fn setup_entities(
     let cart_mass_props = MassPropertiesBundle::from_shape(&cart_collider_model, ALUMINUM_DENSITY); // It is a mix of emptiness and motor and steel.. overall some aluminum?
 
     commands.entity(cart_entity).insert(CartBundle {
-        external_force: ExternalForce::new(Vec3::ZERO),
+        // TODO: remove
+        // external_force: Forces::
         cart: Cart,
         mass_props: cart_mass_props,
         dominance: Dominance(5),
@@ -419,13 +421,15 @@ fn setup_entities(
     // Connect the cart to the rail
     commands.spawn(
         PrismaticJoint::new(rail_entity, cart_entity)
-            .with_free_axis(Vec3::X) // Allow movement along the X-axis
-            .with_compliance(1e-9)
-            .with_linear_velocity_damping(100.0)
-            .with_angular_velocity_damping(10.0)
+            .with_slider_axis(Vec3::X) // Allow movement along the X-axis
+            .with_align_compliance(1e-16)
+            .with_limit_compliance(1e-16)
+            .with_angle_compliance(1e-16) // TODO: find preferable values..?
+            // .with_linear_velocity_damping(100.0)
+            // .with_angular_velocity_damping(10.0)
             .with_limits(-RAIL_WIDTH / 2.0, RAIL_WIDTH / 2.0)
-            .with_local_anchor_1(Vec3::new(0.0, RAIL_HEIGHT / 2.0, 0.0)) // Rail top edge
-            .with_local_anchor_2(Vec3::new(0.0, -CART_HEIGHT / 2.0, 0.0)),
+            .with_local_anchor1(Vec3::new(0.0, RAIL_HEIGHT / 2.0, 0.0)) // Rail top edge
+            .with_local_anchor2(Vec3::new(0.0, -CART_HEIGHT / 2.0, 0.0)),
     );
 
     let rod_collider_model = Collider::capsule(ROD_WIDTH / 2.0, ROD_HEIGHT);
@@ -459,16 +463,18 @@ fn setup_entities(
         .id();
     commands.spawn(
         RevoluteJoint::new(cart_entity, rod_entity)
-            .with_compliance(1e-16)
-            .with_linear_velocity_damping(10.0)
-            .with_angular_velocity_damping(10.0)
-            .with_aligned_axis(Vec3::Z) // Align the axis of rotation along the Z-axis
-            .with_local_anchor_1(Vec3::new(
+            .with_point_compliance(1e-16) // TODO: find preferable values..?
+            .with_align_compliance(1e-16)
+            .with_limit_compliance(1e-16)
+            // .with_linear_velocity_damping(10.0)
+            // .with_angular_velocity_damping(10.0)
+            .with_hinge_axis(Vec3::Z) // Align the axis of rotation along the Z-axis
+            .with_local_anchor1(Vec3::new(
                 0.0,
                 CART_HEIGHT / 2.0,
                 CART_DEPTH / 2.0 + ROD_DEPTH / 2.0 + AXIS_LENGTH,
             )) // aim at the center of the rod at the bottom
-            .with_local_anchor_2(Vec3::new(0.0, -ROD_HEIGHT / 2.0, 0.0)), // Anchor on the rod (bottom)
+            .with_local_anchor2(Vec3::new(0.0, -ROD_HEIGHT / 2.0, 0.0)), // Anchor on the rod (bottom)
     );
 
     // Light
@@ -500,10 +506,10 @@ fn get_rigid_body_entity(
 }
 
 fn on_drag(
-    drag: Trigger<Pointer<Drag>>,
+    drag: On<Pointer<Drag>>,
     camera_query: Option<Single<&Transform, With<Camera>>>,
     parents: Query<(&ChildOf, Option<&RigidBody>)>,
-    mut external_force: Query<&mut ExternalForce>,
+    mut external_force: Query<Forces>,
     drag_control: Res<DragControl>,
 ) {
     if drag.button != PointerButton::Primary {
@@ -515,11 +521,14 @@ fn on_drag(
         return;
     };
 
-    let target_entity = get_rigid_body_entity(drag.target, &parents);
+    let event = On::event(&drag);
+    let target_entity = get_rigid_body_entity(event.entity, &parents);
 
+    // TODO: remove external_force
     if let Ok(mut external_force) = external_force.get_mut(target_entity) {
         // clear any previously applied forces (they persist by default)
-        external_force.clear();
+        // external_force.clear();
+        // TODO: remove
 
         // calculate world X-direction drag from screenspace drag
         // drag.delta.y should basically never contribute (as long as camera isn't rolled), but scaling by camera_transform.right() will feel more natural when dragging from a steep visual angle
@@ -534,49 +543,68 @@ fn on_drag(
 }
 
 fn on_drag_end(
-    drag: Trigger<Pointer<DragEnd>>,
+    drag: On<Pointer<DragEnd>>,
     parents: Query<(&ChildOf, Option<&RigidBody>)>,
-    mut external_force: Query<&mut ExternalForce>,
+    mut external_force: Query<Forces>,
 ) {
     if drag.button != PointerButton::Primary {
         return;
     }
 
-    let target_entity = get_rigid_body_entity(drag.target, &parents);
+    let event = On::event(&drag);
+    let target_entity = get_rigid_body_entity(event.entity, &parents);
 
     if let Ok(mut external_force) = external_force.get_mut(target_entity) {
         // the drag ended, so clear the applied forces
-        external_force.clear();
+        // external_force.clear();
+        // TODO: remove
     }
 }
 
-pub fn external_force_display(
-    external_force: Query<(Entity, &Position, &ExternalForce)>,
-    cart: Query<(), With<Cart>>,
-    rod: Query<(), With<Rod>>,
-    mut gizmos: Gizmos,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut should_display: Local<bool>,
-) {
-    if keys.just_pressed(KeyCode::KeyF) {
-        *should_display = !*should_display;
-    }
-    if *should_display {
-        external_force
-            .iter()
-            .filter(|(entity, _, _)| {
-                // only display external forces for the cart or the rod
-                cart.get(*entity).is_ok() || rod.get(*entity).is_ok()
-            })
-            .for_each(|(_, position, external_force)| {
-                gizmos.arrow(
-                    **position,
-                    **position + (**external_force).clamp_length_max(10.),
-                    RED,
-                );
-            });
-    }
-}
+// pub fn external_force_display(
+//     // external_force: Query<(Entity, &Position)>,//, Forces)>,
+//     // cart: Query<Forces, With<Cart>>,
+//     // rod: Query<Forces, With<Rod>>,
+//     cart: Query<(&Position, Forces), With<Cart>>,
+//     rod: Query<(&Position, Forces), With<Rod>>,
+//     mut gizmos: Gizmos,
+//     keys: Res<ButtonInput<KeyCode>>,
+//     mut should_display: Local<bool>,
+// ) {
+//     if keys.just_pressed(KeyCode::KeyF) {
+//         *should_display = !*should_display;45
+//     }
+//     if *should_display {
+//         // if let Ok((position, forces)) = cart.single() { // FIXME: !!! found the crash
+//         //     let start = **position;
+//         //     let end = start + 10.; // TODO: figure out how to read forces...
+//         //     gizmos.arrow(start, end, RED);
+//         // }
+
+//         // if let Ok((position, forces)) = rod.single() {
+//         //     let start = **position;
+//         //     let end = start + 10.; // TODO: figure out how to read forces...
+//         //     gizmos.arrow(start, end, RED);
+//         // }
+
+//         // external_force
+//         //     .iter()
+//         //     .filter(|(entity, _, _)| {
+//         //         // only display external forces for the cart or the rod
+//         //         cart.get(*entity).is_ok() || rod.get(*entity).is_ok()
+//         //     })
+//         //     .for_each(|(_, position, external_force)| {
+//         //         // let force_vector = external_force.
+
+//         //         gizmos.arrow(
+//         //             **position,
+//         //             Vec3::ZERO,
+//         //             **position + 10., //(**external_force).clamp_length_max(10.),
+//         //             RED,
+//         //         );
+//         //     });
+//     }
+// }
 
 #[allow(clippy::type_complexity)]
 fn reset_sim(
@@ -585,7 +613,7 @@ fn reset_sim(
         Option<&Rod>,
         Option<&Cart>,
         Option<&mut Transform>,
-        Option<&mut ExternalForce>,
+        // Option<Forces>,
         Option<&mut LinearVelocity>,
         Option<&mut AngularVelocity>,
     )>,
@@ -595,7 +623,7 @@ fn reset_sim(
             rod_component,
             cart_component,
             transform,
-            ext_force,
+            // forces,
             linear_velocity,
             angular_velocity,
         ) in query.iter_mut()
@@ -615,9 +643,12 @@ fn reset_sim(
                     transform.translation.x = 0.0;
                 }
             }
-            if let Some(mut ext_force) = ext_force {
-                ext_force.clear();
-            }
+
+            // TODO: Edit this if resetting forces works correctly, but it should be cleared after each iteration
+            // https://docs.rs/avian3d/0.4.1/avian3d/dynamics/rigid_body/forces/struct.Forces.html#usage
+            // if let Some(mut ext_force) = ext_force {
+            //     ext_force.clear();
+            // }
 
             if let Some(mut velocity) = linear_velocity {
                 *velocity = LinearVelocity::ZERO;
@@ -634,8 +665,8 @@ fn reset_sim(
 fn camera_control_system(
     camera_control: Res<CameraControl>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut scroll_evr: EventReader<MouseWheel>,
-    mut mouse_motion: EventReader<MouseMotion>,
+    mut scroll_evr: MessageReader<MouseWheel>,
+    mut mouse_motion: MessageReader<MouseMotion>,
     mut query: Query<&mut Transform, With<Camera>>,
     // use real time to scale camera movement in case physics time is paused
     time: Res<Time<Real>>,
