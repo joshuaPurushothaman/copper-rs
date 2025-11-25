@@ -104,6 +104,7 @@ fn run_copper_callback(
     physics_time: Res<Time<Physics>>,
     robot_clock: ResMut<CopperMockClock>,
     mut copper_ctx: ResMut<Copper>,
+    mut exit_writer: EventWriter<AppExit>,
 ) {
     // Check if the Cart spawned; if not, return early.
     if query_set.p0().is_empty() {
@@ -174,10 +175,11 @@ fn run_copper_callback(
             _ => SimOverride::ExecuteByRuntime,
         }
     };
-    copper_ctx
-        .copper_app
-        .run_one_iteration(&mut sim_callback)
-        .expect("Failed to run application.");
+    if let Err(err) = copper_ctx.copper_app.run_one_iteration(&mut sim_callback) {
+        error!("Simulation stopped: {err}");
+        eprintln!("Simulation stopped: {err}");
+        exit_writer.write(AppExit::Success);
+    }
 }
 
 fn stop_copper_on_exit(mut exit_events: MessageReader<AppExit>, mut copper_ctx: ResMut<Copper>) {
